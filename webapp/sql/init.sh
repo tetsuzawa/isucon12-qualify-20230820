@@ -16,6 +16,12 @@ mysql -u"$ISUCON_DB_USER" \
 		--port "$ISUCON_DB_PORT" \
 		"$ISUCON_DB_NAME" < init.sql
 
+mysql -u"$ISUCON_DB_USER" \
+		-p"$ISUCON_DB_PASSWORD" \
+		--host "$ISUCON_DB_HOST" \
+		--port "$ISUCON_DB_PORT" \
+		"$ISUCON_DB_NAME" < ./tenant/10_schema.sql
+
 for f in ./sqlite3-to-sql-result/*.sql; do
   cat $f
   mysql -u"$ISUCON_DB_USER" \
