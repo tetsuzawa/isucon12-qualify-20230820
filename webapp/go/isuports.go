@@ -1284,6 +1284,7 @@ func competitionScoreHandler(c echo.Context) error {
 		playerID, scoreStr := row[0], row[1]
 		pids = append(pids, playerID)
 		scoreStrs = append(scoreStrs, scoreStr)
+		fmt.Println(playerID)
 	}
 
 	var cnt int
@@ -1299,6 +1300,7 @@ func competitionScoreHandler(c echo.Context) error {
 		return fmt.Errorf("error tx.GetContext: %w", err)
 	}
 
+	fmt.Println(cnt, pids)
 	if cnt != len(pids) {
 		// 存在しない参加者が含まれている
 		tx.Rollback()
