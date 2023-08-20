@@ -785,7 +785,7 @@ func billingReportsByCompetitionIDs(ctx context.Context, tenantDB *sqlx.DB, tena
 	}
 
 	var billingYen int64
-	err = tx.GetContext(ctx, &billingYen, "SELECT SUM(billing_yen) FROM competition_report INNER JOIN competition ON competition.tenant_id = ? AND competition_report.competition_id = competition.id WHERE competition.tenant_id = ?", tenantID, tenantID)
+	err = tx.GetContext(ctx, &billingYen, "SELECT CASE WHEN SUM(billing_yen) IS NOT NULL THEN SUM(billing_yen) ELSE 0 END FROM competition_report INNER JOIN competition ON competition.tenant_id = ? AND competition_report.competition_id = competition.id WHERE competition.tenant_id = ?", tenantID, tenantID)
 	if err != nil {
 		return 0, fmt.Errorf("error Select billingYen: %w", err)
 	}
