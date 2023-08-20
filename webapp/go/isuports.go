@@ -1293,6 +1293,7 @@ func competitionScoreHandler(c echo.Context) error {
 		return fmt.Errorf("error sqlx.In: %w", err)
 	}
 	query = tx.Rebind(query)
+	fmt.Println(query, args)
 	err = tx.GetContext(ctx, &cnt, query, args...)
 	if err != nil {
 		tx.Rollback()
@@ -1301,14 +1302,11 @@ func competitionScoreHandler(c echo.Context) error {
 
 	if cnt != len(pids) {
 		// 存在しない参加者が含まれている
-		if errors.Is(err, sql.ErrNoRows) {
-			tx.Rollback()
-			return echo.NewHTTPError(
-				http.StatusBadRequest,
-				fmt.Sprintf("player not found"),
-			)
-		}
-		return fmt.Errorf("error retrievePlayer: %w", err)
+		tx.Rollback()
+		return echo.NewHTTPError(
+			http.StatusBadRequest,
+			fmt.Sprintf("player not found"),
+		)
 	}
 
 	for i, scoreStr := range scoreStrs {
