@@ -30,9 +30,9 @@ import (
 )
 
 const (
-	tenantDBSchemaFilePath = "../sql/tenant/10_schema.sql"
-	initializeScript       = "../sql/init.sh"
-	cookieName             = "isuports_session"
+	//tenantDBSchemaFilePath = "../sql/tenant/10_schema.sql"
+	initializeScript = "../sql/init.sh"
+	cookieName       = "isuports_session"
 
 	RoleAdmin     = "admin"
 	RoleOrganizer = "organizer"
@@ -65,37 +65,46 @@ func connectAdminDB() (*sqlx.DB, error) {
 	config.User = getEnv("ISUCON_DB_USER", "isucon")
 	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
 	config.DBName = getEnv("ISUCON_DB_NAME", "isuports")
+	config.InterpolateParams = true
 	config.ParseTime = true
 	dsn := config.FormatDSN()
 	return sqlx.Open("mysql", dsn)
 }
 
+// TODO テナントDbを作成して最初に保持する
+// TODOテナントDBに接続するときはその接続を返す
+
 // テナントDBのパスを返す
-func tenantDBPath(id int64) string {
-	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
-	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
-}
+//func tenantDBPath(id int64) string {
+//	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
+//	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
+//}
 
 // テナントDBに接続する
+//func connectToTenantDB(id int64) (*sqlx.DB, error) {
+//	p := tenantDBPath(id)
+//	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
+//	}
+//	return db, nil
+//}
+
 func connectToTenantDB(id int64) (*sqlx.DB, error) {
-	p := tenantDBPath(id)
-	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
-	}
-	return db, nil
+	return adminDB, nil
 }
 
+// TODO create時はSQLを流し込むだけ
 // テナントDBを新規に作成する
-func createTenantDB(id int64) error {
-	p := tenantDBPath(id)
-
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
-	}
-	return nil
-}
+//func createTenantDB(id int64) error {
+//	p := tenantDBPath(id)
+//
+//	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
+//	if out, err := cmd.CombinedOutput(); err != nil {
+//		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
+//	}
+//	return nil
+//}
 
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
@@ -332,6 +341,8 @@ func retrieveTenantRowFromHeader(c echo.Context) (*TenantRow, error) {
 	}
 
 	// テナントの存在確認
+	// TODO: 削除がないのでキャッシュする
+	// 毎回呼ばれる
 	var tenant TenantRow
 	if err := adminDB.GetContext(
 		context.Background(),
@@ -491,9 +502,9 @@ func tenantsAddHandler(c echo.Context) error {
 	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
 	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
 	//       ロックなどで対処したほうが良さそう
-	if err := createTenantDB(id); err != nil {
-		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
-	}
+	//if err := createTenantDB(id); err != nil {
+	//	return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
+	//}
 
 	res := TenantsAddHandlerResult{
 		Tenant: TenantWithBilling{
