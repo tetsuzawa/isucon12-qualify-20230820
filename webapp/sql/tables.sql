@@ -1,15 +1,15 @@
-create table isuports.competition_report
+CREATE TABLE IF NOT EXISTS isuports.competition_report
 (
-    id                  int auto_increment
-        primary key,
-    competition_id      varchar(256) null,
-    competition_title   text         null,
-    visitor_count       int          null,
-    player_count        int          null,
-    billing_player_yen  int          null,
-    billing_visitor_yen int          null,
-    billing_yen         int          null,
-    constraint competition_report_competition_id_fk
-        foreign key (competition_id) references isuports.competition (id)
+    id                  INT AUTO_INCREMENT
+        PRIMARY KEY,
+    competition_id      VARCHAR(256) NULL,
+    competition_title   TEXT         NULL,
+    visitor_count       INT          NULL,
+    player_count        INT          NULL,
+    billing_player_yen  INT          NULL,
+    billing_visitor_yen INT          NULL,
+    billing_yen         INT          NULL,
+    CONSTRAINT competition_report_competition_id_fk
+        FOREIGN KEY (competition_id) REFERENCES isuports.competition (id)
 );
 
