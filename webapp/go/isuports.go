@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/samber/lo"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -239,10 +238,14 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
-	tsrc := rand.NewSource(time.Now().UnixNano())
-	rnd := rand.New(tsrc)
 	// katsubushi
-	idg, err = katsubushi.NewGenerator(uint(rnd.Uint64()))
+	workerIDStr := getEnv("WORKER_ID", "1")
+	workerID, err := strconv.ParseUint(workerIDStr, 10, 64)
+	if err != nil {
+		e.Logger.Fatalf("failed to parse WORKER_ID: %v", err)
+		return
+	}
+	idg, err = katsubushi.NewGenerator(uint(workerID))
 	if err != nil {
 		e.Logger.Fatalf("failed to connect katsubushi: %v", err)
 		return
