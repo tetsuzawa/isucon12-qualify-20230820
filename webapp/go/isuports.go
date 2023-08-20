@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/samber/lo"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/gofrs/flock"
 	"github.com/jmoiron/sqlx"
+	katsubushi "github.com/kayac/go-katsubushi/v2"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/labstack/gommon/log"
@@ -49,6 +51,9 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	// id generator
+	idg katsubushi.Generator
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -109,29 +114,37 @@ func connectToTenantDB(id int64) (*sqlx.DB, error) {
 //}
 
 // システム全体で一意なIDを生成する
+//
+//	func dispenseID(ctx context.Context) (string, error) {
+//		var id int64
+//		var lastErr error
+//		for i := 0; i < 100; i++ {
+//			var ret sql.Result
+//			ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
+//			if err != nil {
+//				if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
+//					lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+//					continue
+//				}
+//				return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+//			}
+//			id, err = ret.LastInsertId()
+//			if err != nil {
+//				return "", fmt.Errorf("error ret.LastInsertId: %w", err)
+//			}
+//			break
+//		}
+//		if id != 0 {
+//			return fmt.Sprintf("%x", id), nil
+//		}
+//		return "", lastErr
+//	}
 func dispenseID(ctx context.Context) (string, error) {
-	var id int64
-	var lastErr error
-	for i := 0; i < 100; i++ {
-		var ret sql.Result
-		ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
-		if err != nil {
-			if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
-				lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-				continue
-			}
-			return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-		}
-		id, err = ret.LastInsertId()
-		if err != nil {
-			return "", fmt.Errorf("error ret.LastInsertId: %w", err)
-		}
-		break
+	id, err := idg.NextID()
+	if err != nil {
+		return "", fmt.Errorf("error idg.NextID: %w", err)
 	}
-	if id != 0 {
-		return fmt.Sprintf("%x", id), nil
-	}
-	return "", lastErr
+	return strconv.FormatUint(id, 10), nil
 }
 
 // 全APIにCache-Control: privateを設定する
@@ -225,6 +238,15 @@ func Run() {
 	}
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
+
+	tsrc := rand.NewSource(time.Now().UnixNano())
+	rnd := rand.New(tsrc)
+	// katsubushi
+	idg, err = katsubushi.NewGenerator(uint(rnd.Uint64()))
+	if err != nil {
+		e.Logger.Fatalf("failed to connect katsubushi: %v", err)
+		return
+	}
 
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
