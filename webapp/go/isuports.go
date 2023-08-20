@@ -1303,7 +1303,7 @@ func competitionScoreHandler(c echo.Context) error {
 		return fmt.Errorf("error tx.GetContext: %w", err)
 	}
 
-	if cnt != len(pids) {
+	if cnt != len(pidsSets) {
 		// 存在しない参加者が含まれている
 		tx.Rollback()
 		return echo.NewHTTPError(
