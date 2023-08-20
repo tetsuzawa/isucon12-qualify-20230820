@@ -554,7 +554,13 @@ func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID
 	if err != nil {
 		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
 	}
-
+	// 大会が終了していない場合は課金レポートを作成しない
+	if !comp.FinishedAt.Valid {
+		return &BillingReport{
+			CompetitionID:    comp.ID,
+			CompetitionTitle: comp.Title,
+		}, nil
+	}
 	// ランキングにアクセスした参加者のIDを取得する
 	vhs := []VisitHistorySummaryRow{}
 	if err := adminDB.SelectContext(
