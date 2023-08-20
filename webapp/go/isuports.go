@@ -952,34 +952,75 @@ func playersAddHandler(c echo.Context) error {
 	}
 	displayNames := params["display_name[]"]
 
-	pds := make([]PlayerDetail, 0, len(displayNames))
-	for _, displayName := range displayNames {
+	ids := make([]string, 0, len(displayNames))
+	for _ = range displayNames {
 		id, err := dispenseID(ctx)
 		if err != nil {
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
+		ids = append(ids, id)
+	}
 
+	vs := []string{}
+	for i, displayName := range displayNames {
 		now := time.Now().Unix()
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			id, v.tenantID, displayName, false, now, now,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
-				id, displayName, false, now, now, err,
-			)
-		}
-		p, err := retrievePlayer(ctx, tenantDB, id)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		vs = append(vs, fmt.Sprintf("('%s', %d, '%s', %v, %v, %v)", ids[i], v.tenantID, displayName, false, now, now))
+	}
+	q := "INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES " + strings.Join(vs, ",")
+	if _, err := tenantDB.ExecContext(ctx, q); err != nil {
+		return fmt.Errorf("error Insert player at tenantDB: %w", err)
+	}
+
+	var pls []PlayerRow
+	query, args, err := sqlx.In("SELECT * FROM player WHERE tenant_id IN (?)", ids)
+	query = tenantDB.Rebind(query)
+
+	if err := tenantDB.SelectContext(
+		ctx,
+		&pls,
+		query,
+		args,
+	); err != nil {
+		return fmt.Errorf("error Select player: %w", err)
+	}
+
+	pds := make([]PlayerDetail, 0, len(displayNames))
+
+	for _, pr := range pls {
 		pds = append(pds, PlayerDetail{
-			ID:             p.ID,
-			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			ID:             pr.ID,
+			DisplayName:    pr.DisplayName,
+			IsDisqualified: pr.IsDisqualified,
 		})
 	}
+
+	//for _, displayName := range displayNames {
+	//	id, err := dispenseID(ctx)
+	//	if err != nil {
+	//		return fmt.Errorf("error dispenseID: %w", err)
+	//	}
+	//
+	//	now := time.Now().Unix()
+	//	if _, err := tenantDB.ExecContext(
+	//		ctx,
+	//		"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+	//		id, v.tenantID, displayName, false, now, now,
+	//	); err != nil {
+	//		return fmt.Errorf(
+	//			"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
+	//			id, displayName, false, now, now, err,
+	//		)
+	//	}
+	//	p, err := retrievePlayer(ctx, tenantDB, id)
+	//	if err != nil {
+	//		return fmt.Errorf("error retrievePlayer: %w", err)
+	//	}
+	//	pds = append(pds, PlayerDetail{
+	//		ID:             p.ID,
+	//		DisplayName:    p.DisplayName,
+	//		IsDisqualified: p.IsDisqualified,
+	//	})
+	//}
 
 	res := PlayersAddHandlerResult{
 		Players: pds,
