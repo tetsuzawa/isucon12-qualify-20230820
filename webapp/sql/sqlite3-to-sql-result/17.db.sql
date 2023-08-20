@@ -102,7 +102,7 @@ INSERT INTO player VALUES('6001dd9b9',17,'Shanon Brakus',0,1653940376,1654040208
 INSERT INTO player VALUES('604ab9f29',17,'Angel Bradtke',0,1653948016,1653986500);
 INSERT INTO player VALUES('60f82bd16',17,'Roman Schmidt',0,1653966203,1653987464);
 INSERT INTO player VALUES('610528fdc',17,'Lyla Miller MD',0,1653967565,1653967778);
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS "player_score" (
+CREATE TABLE IF NOT EXISTS IF NOT EXISTS player_score (
                               id VARCHAR(255) NOT NULL PRIMARY KEY,
                               tenant_id BIGINT NOT NULL,
                               player_id VARCHAR(255) NOT NULL,
