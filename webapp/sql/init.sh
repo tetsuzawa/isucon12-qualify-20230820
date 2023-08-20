@@ -10,4 +10,21 @@ ISUCON_DB_PASSWORD=${ISUCON_DB_PASSWORD:-isucon}
 ISUCON_DB_NAME=${ISUCON_DB_NAME:-isuports}
 
 # MySQLを初期化
-sudo cp -rf /var/lib/mysql.backup /var/lib/mysql
+mysql -u"$ISUCON_DB_USER" \
+		-p"$ISUCON_DB_PASSWORD" \
+		--host "$ISUCON_DB_HOST" \
+		--port "$ISUCON_DB_PORT" \
+		"$ISUCON_DB_NAME" < init.sql
+
+for f in ./sqlite3-to-sql-result/*.sql; do
+  cat $f
+  mysql -u"$ISUCON_DB_USER" \
+    -p"$ISUCON_DB_PASSWORD" \
+    --host "$ISUCON_DB_HOST" \
+    --port "$ISUCON_DB_PORT" \
+    "$ISUCON_DB_NAME" < $f
+done
+
+# SQLiteのデータベースを初期化
+#rm -f ../tenant_db/*.db
+#cp -r ../../initial_data/*.db ../tenant_db/
