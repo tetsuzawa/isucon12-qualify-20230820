@@ -421,13 +421,13 @@ func retrieveCompetition(ctx context.Context, tenantDB dbOrTx, id string) (*Comp
 	return &c, nil
 }
 
-func retrieveCompetitionForUpdate(ctx context.Context, tenantDB dbOrTx, id string) (*CompetitionRow, error) {
-	var c CompetitionRow
-	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition WHERE id = ? FOR UPDATE", id); err != nil {
-		return nil, fmt.Errorf("error Select competition: id=%s, %w", id, err)
-	}
-	return &c, nil
-}
+//func retrieveCompetitionForUpdate(ctx context.Context, tenantDB dbOrTx, id string) (*CompetitionRow, error) {
+//	var c CompetitionRow
+//	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition WHERE id = ?", id); err != nil {
+//		return nil, fmt.Errorf("error Select competition: id=%s, %w", id, err)
+//	}
+//	return &c, nil
+//}
 
 type PlayerScoreRow struct {
 	TenantID      int64  `db:"tenant_id"`
@@ -641,6 +641,8 @@ type VisitHistorySummaryRow struct {
 //	}, nil
 //}
 
+var brCache = NewCache[string, *BillingReport]()
+
 func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID int64, competitonID string) (*BillingReport, error) {
 	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
 	if err != nil {
@@ -654,33 +656,43 @@ func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID
 		}, nil
 	}
 
-	tx, err := tenantDB.Beginx()
-	if err != nil {
-		return nil, fmt.Errorf("error bigin: %w", err)
-	}
-	defer tx.Commit()
+	//tx, err := tenantDB.Beginx()
+	//if err != nil {
+	//	return nil, fmt.Errorf("error bigin: %w", err)
+	//}
+	//defer tx.Commit()
 
 	// 大会が終了している場合のみ請求金額が確定するので計算する
 
 	br := &BillingReport{}
-
-	err = tx.GetContext(ctx, br, "SELECT * FROM competition_report WHERE competition_id = ?", competitonID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &BillingReport{
-			CompetitionID:    comp.ID,
-			CompetitionTitle: comp.Title,
-		}, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("error Select competition report: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+	cacheKey := fmt.Sprintf("bilingcache:%s", competitonID)
+	v, ok := brCache.Get(cacheKey)
+	if ok {
+		return v, nil
 	}
+	br, err = generateBillingReport(ctx, tenantDB, tenantID, competitonID)
+	if err != nil {
+		return nil, fmt.Errorf("error generateBillingReport: %w", err)
+	}
+	brCache.Set(cacheKey, br)
+
+	//err = tx.GetContext(ctx, br, "SELECT * FROM competition_report WHERE competition_id = ?", competitonID)
+	//if errors.Is(err, sql.ErrNoRows) {
+	//	return &BillingReport{
+	//		CompetitionID:    comp.ID,
+	//		CompetitionTitle: comp.Title,
+	//	}, nil
+	//} else if err != nil {
+	//	return nil, fmt.Errorf("error Select competition report: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+	//}
 	return br, nil
 }
 
 // 大会ごとの課金レポートを計算する
-func generateBillingReport(ctx context.Context, tenantDB *sqlx.Tx, tenantID int64, competitonID string) error {
+func generateBillingReport(ctx context.Context, tenantDB *sqlx.DB, tenantID int64, competitonID string) (*BillingReport, error) {
 	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
 	if err != nil {
-		return fmt.Errorf("error retrieveCompetition: %w", err)
+		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 	// ランキングにアクセスした参加者のIDを取得する
 	vhs := []VisitHistorySummaryRow{}
@@ -691,7 +703,7 @@ func generateBillingReport(ctx context.Context, tenantDB *sqlx.Tx, tenantID int6
 		tenantID,
 		comp.ID,
 	); err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("error Select visit_history: tenantID=%d, competitionID=%s, %w", tenantID, comp.ID, err)
+		return nil, fmt.Errorf("error Select visit_history: tenantID=%d, competitionID=%s, %w", tenantID, comp.ID, err)
 	}
 	billingMap := map[string]string{}
 	for _, vh := range vhs {
@@ -717,7 +729,7 @@ func generateBillingReport(ctx context.Context, tenantDB *sqlx.Tx, tenantID int6
 		"SELECT DISTINCT(player_id) FROM player_score WHERE tenant_id = ? AND competition_id = ?",
 		tenantID, comp.ID,
 	); err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
 	}
 	for _, pid := range scoredPlayerIDs {
 		// スコアが登録されている参加者
@@ -746,16 +758,16 @@ func generateBillingReport(ctx context.Context, tenantDB *sqlx.Tx, tenantID int6
 		BillingYen:        100*playerCount + 10*visitorCount,
 	}
 
-	_, err = tenantDB.NamedExecContext(
-		ctx,
-		"INSERT INTO competition_report (competition_id, competition_title, player_count, visitor_count, billing_player_yen, billing_visitor_yen, billing_yen) VALUES (:competition_id, :competition_title, :player_count, :visitor_count, :billing_player_yen, :billing_visitor_yen, :billing_yen)",
-		br,
-	)
-	if err != nil {
-		return fmt.Errorf("error insert competition_report: %w", err)
-	}
+	//_, err = tenantDB.NamedExecContext(
+	//	ctx,
+	//	"INSERT INTO competition_report (competition_id, competition_title, player_count, visitor_count, billing_player_yen, billing_visitor_yen, billing_yen) VALUES (:competition_id, :competition_title, :player_count, :visitor_count, :billing_player_yen, :billing_visitor_yen, :billing_yen)",
+	//	br,
+	//)
+	//if err != nil {
+	//	return fmt.Errorf("error insert competition_report: %w", err)
+	//}
 
-	return nil
+	return br, nil
 }
 
 type TenantWithBilling struct {
@@ -1114,7 +1126,7 @@ func competitionFinishHandler(c echo.Context) error {
 		tx.Rollback()
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	_, err = retrieveCompetitionForUpdate(ctx, tx, id)
+	_, err = retrieveCompetition(ctx, tx, id)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1137,11 +1149,11 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
-	err = generateBillingReport(ctx, tx, v.tenantID, id)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error generateBillingReport: %w", err)
-	}
+	//err = generateBillingReport(ctx, tx, v.tenantID, id)
+	//if err != nil {
+	//	tx.Rollback()
+	//	return fmt.Errorf("error generateBillingReport: %w", err)
+	//}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
