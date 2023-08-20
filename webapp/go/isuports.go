@@ -464,6 +464,18 @@ type PlayerScoreRow struct {
 	UpdatedAt     int64  `db:"updated_at"`
 }
 
+type PlayerScoreRowWithDisplayName struct {
+	TenantID      int64  `db:"tenant_id"`
+	ID            string `db:"id"`
+	PlayerID      string `db:"player_id"`
+	CompetitionID string `db:"competition_id"`
+	Score         int64  `db:"score"`
+	RowNum        int64  `db:"row_num"`
+	CreatedAt     int64  `db:"created_at"`
+	UpdatedAt     int64  `db:"updated_at"`
+	DisplayName   string `db:"display_name"`
+}
+
 // 排他ロックのためのファイル名を生成する
 func lockFilePath(id int64) string {
 	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
@@ -1615,11 +1627,11 @@ func competitionRankingHandler(c echo.Context) error {
 		ranks = v
 	} else {
 
-		pss := []PlayerScoreRow{}
+		pss := []PlayerScoreRowWithDisplayName{}
 		if err := tx.SelectContext(
 			ctx,
 			&pss,
-			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+			"SELECT player_score.*, player.display_name FROM player_score INNER JOIN player ON player_score.tenant_id = ? AND player_score.competition_id = ? AND player_score.player_id = player.id ORDER BY row_num DESC;",
 			tenant.ID,
 			competitionID,
 		); err != nil {
@@ -1635,15 +1647,15 @@ func competitionRankingHandler(c echo.Context) error {
 				continue
 			}
 			scoredPlayerSet[ps.PlayerID] = struct{}{}
-			p, err := retrievePlayer(ctx, tx, ps.PlayerID)
-			if err != nil {
-				tx.Rollback()
-				return fmt.Errorf("error retrievePlayer: %w", err)
-			}
+			//p, err := retrievePlayer(ctx, tx, ps.PlayerID)
+			//if err != nil {
+			//	tx.Rollback()
+			//	return fmt.Errorf("error retrievePlayer: %w", err)
+			//}
 			ranks = append(ranks, CompetitionRank{
 				Score:             ps.Score,
-				PlayerID:          p.ID,
-				PlayerDisplayName: p.DisplayName,
+				PlayerID:          ps.PlayerID,
+				PlayerDisplayName: ps.DisplayName,
 				RowNum:            ps.RowNum,
 			})
 		}
