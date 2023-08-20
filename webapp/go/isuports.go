@@ -526,6 +526,7 @@ func validateTenantName(name string) error {
 }
 
 type BillingReport struct {
+	ID                string `json:"id" db:"id"`
 	CompetitionID     string `json:"competition_id" db:"competition_id"`
 	CompetitionTitle  string `json:"competition_title" db:"competition_title"`
 	PlayerCount       int64  `json:"player_count" db:"player_count"`               // スコアを登録した参加者数
