@@ -1,0 +1,19 @@
+#!/bin/sh
+
+set -e
+if [ "$1" = "" ]; then
+  echo "Usage: $0 path/to/foo.db"
+  echo
+  echo "Dump the sqlite3 database file to generic SQL statements."
+  exit 1
+fi
+
+cat <<EOF | sqlite3 "$1"
+.mode csv
+.output "$1.competition.csv"
+SELECT * FROM competition;
+.output "$1.player.csv"
+SELECT * FROM player;
+.output "$1.player_score.csv"
+SELECT * FROM player_score;
+EOF
