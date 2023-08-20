@@ -423,7 +423,7 @@ func retrieveCompetition(ctx context.Context, tenantDB dbOrTx, id string) (*Comp
 
 func retrieveCompetitionForUpdate(ctx context.Context, tenantDB dbOrTx, id string) (*CompetitionRow, error) {
 	var c CompetitionRow
-	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition FOR UPDATE WHERE id = ?", id); err != nil {
+	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition WHERE id = ? FOR UPDATE", id); err != nil {
 		return nil, fmt.Errorf("error Select competition: id=%s, %w", id, err)
 	}
 	return &c, nil
