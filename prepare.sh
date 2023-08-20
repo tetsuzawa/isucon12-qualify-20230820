@@ -25,7 +25,7 @@ EOF
 . /tmp/prepared_env
 
 # isucon serviceで使うenv
-. ./env.sh
+. ./env
 
 # ====== go ======
 cd /home/isucon/webapp/go
