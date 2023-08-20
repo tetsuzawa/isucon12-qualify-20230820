@@ -1292,7 +1292,6 @@ func competitionScoreHandler(c echo.Context) error {
 		tx.Rollback()
 		return fmt.Errorf("error sqlx.In: %w", err)
 	}
-	query = tx.Rebind(query)
 	fmt.Println(query, args)
 	err = tx.GetContext(ctx, &cnt, query, args...)
 	if err != nil {
