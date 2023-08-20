@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,6 +164,29 @@ func Run() {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(SetCacheControlPrivate)
+
+	handler := func(h http.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			h.ServeHTTP(c.Response(), c.Request())
+			return nil
+		}
+	}
+
+	prefixRouter := e.Group("/debug/pprof")
+	{
+		prefixRouter.GET("/", handler(pprof.Index))
+		prefixRouter.GET("/allocs", handler(pprof.Handler("allocs").ServeHTTP))
+		prefixRouter.GET("/block", handler(pprof.Handler("block").ServeHTTP))
+		prefixRouter.GET("/cmdline", handler(pprof.Cmdline))
+		prefixRouter.GET("/goroutine", handler(pprof.Handler("goroutine").ServeHTTP))
+		prefixRouter.GET("/heap", handler(pprof.Handler("heap").ServeHTTP))
+		prefixRouter.GET("/mutex", handler(pprof.Handler("mutex").ServeHTTP))
+		prefixRouter.GET("/profile", handler(pprof.Profile))
+		prefixRouter.POST("/symbol", handler(pprof.Symbol))
+		prefixRouter.GET("/symbol", handler(pprof.Symbol))
+		prefixRouter.GET("/threadcreate", handler(pprof.Handler("threadcreate").ServeHTTP))
+		//prefixRouter.GET("/trace", echo.WrapHandler(pprof.Trace))
+	}
 
 	// SaaS管理者向けAPI
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
