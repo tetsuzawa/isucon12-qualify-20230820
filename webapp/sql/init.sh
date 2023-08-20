@@ -10,4 +10,4 @@ ISUCON_DB_PASSWORD=${ISUCON_DB_PASSWORD:-isucon}
 ISUCON_DB_NAME=${ISUCON_DB_NAME:-isuports}
 
 # MySQLを初期化
-sudo cp /var/lib/mysql-data.backup /var/lib/mysql-data
+sudo cp -rf /var/lib/mysql.backup /var/lib/mysql
