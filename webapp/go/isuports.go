@@ -431,6 +431,22 @@ type PlayerScoreRow struct {
 	CreatedAt     int64  `db:"created_at"`
 	UpdatedAt     int64  `db:"updated_at"`
 }
+type PlayerScoreRowCompetitionRank struct {
+	TenantID      int64  `db:"tenant_id"`
+	ID            string `db:"id"`
+	PlayerID      string `db:"player_id"`
+	CompetitionID string `db:"competition_id"`
+	Score         int64  `db:"score"`
+	RowNum        int64  `db:"row_num"`
+	CreatedAt     int64  `db:"created_at"`
+	UpdatedAt     int64  `db:"updated_at"`
+
+	Rank int64 `json:"rank" db:"rank"`
+	//Score int64 `json:"score" db:"score"`
+	//PlayerID          string `json:"player_id" db:"player_id"`
+	PlayerDisplayName string `json:"player_display_name" db:"player_display_name"`
+	//RowNum            int64  `json:"-" db:"row_num"` // APIレスポンスのJSONには含まれない
+}
 
 // 排他ロックのためのファイル名を生成する
 func lockFilePath(id int64) string {
@@ -1376,11 +1392,12 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
-	pss := []PlayerScoreRow{}
+	//pss := []PlayerScoreRow{}
+	pss := []PlayerScoreRowCompetitionRank{}
 	if err := tenantDB.SelectContext(
 		ctx,
 		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+		"SELECT * FROM player_score JOIN player ON player_score.player_id = player.id WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
 		tenant.ID,
 		competitionID,
 	); err != nil {
@@ -1395,14 +1412,16 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		//p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
+		//if err != nil {
+		//	return fmt.Errorf("error retrievePlayer: %w", err)
+		//}
 		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
+			Score: ps.Score,
+			//PlayerID:          p.ID,
+			//PlayerDisplayName: p.DisplayName,
+			PlayerID:          ps.PlayerID,
+			PlayerDisplayName: ps.PlayerDisplayName,
 			RowNum:            ps.RowNum,
 		})
 	}
