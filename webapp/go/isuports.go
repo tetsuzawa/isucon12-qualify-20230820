@@ -1151,7 +1151,7 @@ func competitionScoreHandler(c echo.Context) error {
 		//
 		//}
 	}
-	q := fmt.Sprintf("INSERT INTO player_score VALUES %s", strings.Join(values, ","))
+	q := fmt.Sprintf("INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES %s", strings.Join(values, ","))
 	if _, err := tx.ExecContext(
 		ctx,
 		q,
