@@ -657,8 +657,13 @@ func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID
 	br := &BillingReport{}
 
 	err = tx.GetContext(ctx, br, "SELECT * FROM competition_report WHERE competition_id = ?", competitonID)
-	if err != nil {
-		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &BillingReport{
+			CompetitionID:    comp.ID,
+			CompetitionTitle: comp.Title,
+		}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("error Select competition report: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
 	}
 	return br, nil
 }
