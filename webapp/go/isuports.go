@@ -1265,6 +1265,8 @@ func competitionScoreHandler(c echo.Context) error {
 
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
+	pids := []string{}
+	scoreStrs := []string{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1280,19 +1282,38 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tx, playerID); err != nil {
-			// 存在しない参加者が含まれている
-			if errors.Is(err, sql.ErrNoRows) {
-				tx.Rollback()
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					fmt.Sprintf("player not found: %s", playerID),
-				)
-			}
-			return fmt.Errorf("error retrievePlayer: %w", err)
+		pids = append(pids, playerID)
+		scoreStrs = append(scoreStrs, scoreStr)
+	}
+
+	var cnt int
+	query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pids)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error sqlx.In: %w", err)
+	}
+	query = tx.Rebind(query)
+	err = tx.GetContext(ctx, &cnt, query, args...)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error tx.GetContext: %w", err)
+	}
+
+	if cnt != len(pids) {
+		// 存在しない参加者が含まれている
+		if errors.Is(err, sql.ErrNoRows) {
+			tx.Rollback()
+			return echo.NewHTTPError(
+				http.StatusBadRequest,
+				fmt.Sprintf("player not found"),
+			)
 		}
+		return fmt.Errorf("error retrievePlayer: %w", err)
+	}
+
+	for i, scoreStr := range scoreStrs {
 		var score int64
-		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
+		if score, err = strconv.ParseInt(scoreStrs[i], 10, 64); err != nil {
 			tx.Rollback()
 			return echo.NewHTTPError(
 				http.StatusBadRequest,
@@ -1308,7 +1329,7 @@ func competitionScoreHandler(c echo.Context) error {
 		playerScoreRows = append(playerScoreRows, PlayerScoreRow{
 			ID:            id,
 			TenantID:      v.tenantID,
-			PlayerID:      playerID,
+			PlayerID:      pids[i],
 			CompetitionID: competitionID,
 			Score:         score,
 			RowNum:        rowNum,
