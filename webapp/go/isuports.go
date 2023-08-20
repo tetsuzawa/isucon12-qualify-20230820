@@ -765,7 +765,7 @@ func billingReportsByCompetitionIDs(ctx context.Context, tenantDB *sqlx.DB, tena
 
 	var cs []CompetitionCompetitionReportRow
 	cids := make([]string, 0, len(cs))
-	err = tx.SelectContext(ctx, &cs, "SELECT competition.id, competition.finished_at FROM competition LEFT JOIN competition_report ON competition.tenant_id = ? AND  competition.finished_at IS NOT NULL AND competition.id = competition_report.competition_id WHERE competition_report.id IS NOT NULL", tenantID)
+	err = tx.SelectContext(ctx, &cs, "SELECT * FROM competition LEFT JOIN competition_report ON competition.tenant_id = ? AND competition.id = competition_report.competition_id WHERE competition.tenant_id = ? AND competition.finished_at IS NOT NULL AND competition_report.id IS NULL", tenantID, tenantID)
 	if err != nil {
 		return 0, fmt.Errorf("error Select competition: tenantID=%d, %w", tenantID, err)
 	}
