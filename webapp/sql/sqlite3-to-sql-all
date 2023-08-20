@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+set -eu
+mkdir -p ./sqlite3-to-sql-result
+
+for f in ../tenant_db/*.db; do
+  echo $f
+  ./sqlite3-to-sql ${f} > ./sqlite3-to-sql-result/"$(basename ${f})".sql
+done

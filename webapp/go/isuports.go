@@ -6,9 +6,11 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"github.com/samber/lo"
 	"io"
 	"math/rand"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,9 +34,9 @@ import (
 )
 
 const (
-	tenantDBSchemaFilePath = "../sql/tenant/10_schema.sql"
-	initializeScript       = "../sql/init.sh"
-	cookieName             = "isuports_session"
+	//tenantDBSchemaFilePath = "../sql/tenant/10_schema.sql"
+	initializeScript = "../sql/init.sh"
+	cookieName       = "isuports_session"
 
 	RoleAdmin     = "admin"
 	RoleOrganizer = "organizer"
@@ -70,37 +72,46 @@ func connectAdminDB() (*sqlx.DB, error) {
 	config.User = getEnv("ISUCON_DB_USER", "isucon")
 	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
 	config.DBName = getEnv("ISUCON_DB_NAME", "isuports")
+	config.InterpolateParams = true
 	config.ParseTime = true
 	dsn := config.FormatDSN()
 	return sqlx.Open("mysql", dsn)
 }
 
+// TODO テナントDbを作成して最初に保持する
+// TODOテナントDBに接続するときはその接続を返す
+
 // テナントDBのパスを返す
-func tenantDBPath(id int64) string {
-	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
-	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
-}
+//func tenantDBPath(id int64) string {
+//	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
+//	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
+//}
 
 // テナントDBに接続する
+//func connectToTenantDB(id int64) (*sqlx.DB, error) {
+//	p := tenantDBPath(id)
+//	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
+//	}
+//	return db, nil
+//}
+
 func connectToTenantDB(id int64) (*sqlx.DB, error) {
-	p := tenantDBPath(id)
-	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
-	}
-	return db, nil
+	return adminDB, nil
 }
 
+// TODO create時はSQLを流し込むだけ
 // テナントDBを新規に作成する
-func createTenantDB(id int64) error {
-	p := tenantDBPath(id)
-
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
-	}
-	return nil
-}
+//func createTenantDB(id int64) error {
+//	p := tenantDBPath(id)
+//
+//	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
+//	if out, err := cmd.CombinedOutput(); err != nil {
+//		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
+//	}
+//	return nil
+//}
 
 // システム全体で一意なIDを生成する
 //
@@ -167,6 +178,29 @@ func Run() {
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(SetCacheControlPrivate)
+
+	handler := func(h http.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			h.ServeHTTP(c.Response(), c.Request())
+			return nil
+		}
+	}
+
+	prefixRouter := e.Group("/debug/pprof")
+	{
+		prefixRouter.GET("/", handler(pprof.Index))
+		prefixRouter.GET("/allocs", handler(pprof.Handler("allocs").ServeHTTP))
+		prefixRouter.GET("/block", handler(pprof.Handler("block").ServeHTTP))
+		prefixRouter.GET("/cmdline", handler(pprof.Cmdline))
+		prefixRouter.GET("/goroutine", handler(pprof.Handler("goroutine").ServeHTTP))
+		prefixRouter.GET("/heap", handler(pprof.Handler("heap").ServeHTTP))
+		prefixRouter.GET("/mutex", handler(pprof.Handler("mutex").ServeHTTP))
+		prefixRouter.GET("/profile", handler(pprof.Profile))
+		prefixRouter.POST("/symbol", handler(pprof.Symbol))
+		prefixRouter.GET("/symbol", handler(pprof.Symbol))
+		prefixRouter.GET("/threadcreate", handler(pprof.Handler("threadcreate").ServeHTTP))
+		//prefixRouter.GET("/trace", echo.WrapHandler(pprof.Trace))
+	}
 
 	// SaaS管理者向けAPI
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
@@ -354,6 +388,8 @@ func retrieveTenantRowFromHeader(c echo.Context) (*TenantRow, error) {
 	}
 
 	// テナントの存在確認
+	// TODO: 削除がないのでキャッシュする
+	// 毎回呼ばれる
 	var tenant TenantRow
 	if err := adminDB.GetContext(
 		context.Background(),
@@ -432,6 +468,14 @@ func retrieveCompetition(ctx context.Context, tenantDB dbOrTx, id string) (*Comp
 	return &c, nil
 }
 
+//func retrieveCompetitionForUpdate(ctx context.Context, tenantDB dbOrTx, id string) (*CompetitionRow, error) {
+//	var c CompetitionRow
+//	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition WHERE id = ?", id); err != nil {
+//		return nil, fmt.Errorf("error Select competition: id=%s, %w", id, err)
+//	}
+//	return &c, nil
+//}
+
 type PlayerScoreRow struct {
 	TenantID      int64  `db:"tenant_id"`
 	ID            string `db:"id"`
@@ -441,6 +485,18 @@ type PlayerScoreRow struct {
 	RowNum        int64  `db:"row_num"`
 	CreatedAt     int64  `db:"created_at"`
 	UpdatedAt     int64  `db:"updated_at"`
+}
+
+type PlayerScoreRowWithDisplayName struct {
+	TenantID      int64  `db:"tenant_id"`
+	ID            string `db:"id"`
+	PlayerID      string `db:"player_id"`
+	CompetitionID string `db:"competition_id"`
+	Score         int64  `db:"score"`
+	RowNum        int64  `db:"row_num"`
+	CreatedAt     int64  `db:"created_at"`
+	UpdatedAt     int64  `db:"updated_at"`
+	DisplayName   string `db:"display_name"`
 }
 
 // 排他ロックのためのファイル名を生成する
@@ -513,9 +569,9 @@ func tenantsAddHandler(c echo.Context) error {
 	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
 	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
 	//       ロックなどで対処したほうが良さそう
-	if err := createTenantDB(id); err != nil {
-		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
-	}
+	//if err := createTenantDB(id); err != nil {
+	//	return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
+	//}
 
 	res := TenantsAddHandlerResult{
 		Tenant: TenantWithBilling{
@@ -537,13 +593,14 @@ func validateTenantName(name string) error {
 }
 
 type BillingReport struct {
-	CompetitionID     string `json:"competition_id"`
-	CompetitionTitle  string `json:"competition_title"`
-	PlayerCount       int64  `json:"player_count"`        // スコアを登録した参加者数
-	VisitorCount      int64  `json:"visitor_count"`       // ランキングを閲覧だけした(スコアを登録していない)参加者数
-	BillingPlayerYen  int64  `json:"billing_player_yen"`  // 請求金額 スコアを登録した参加者分
-	BillingVisitorYen int64  `json:"billing_visitor_yen"` // 請求金額 ランキングを閲覧だけした(スコアを登録していない)参加者分
-	BillingYen        int64  `json:"billing_yen"`         // 合計請求金額
+	ID                string `json:"id" db:"id"`
+	CompetitionID     string `json:"competition_id" db:"competition_id"`
+	CompetitionTitle  string `json:"competition_title" db:"competition_title"`
+	PlayerCount       int64  `json:"player_count" db:"player_count"`               // スコアを登録した参加者数
+	VisitorCount      int64  `json:"visitor_count" db:"visitor_count"`             // ランキングを閲覧だけした(スコアを登録していない)参加者数
+	BillingPlayerYen  int64  `json:"billing_player_yen" db:"billing_player_yen"`   // 請求金額 スコアを登録した参加者分
+	BillingVisitorYen int64  `json:"billing_visitor_yen" db:"billing_visitor_yen"` // 請求金額 ランキングを閲覧だけした(スコアを登録していない)参加者分
+	BillingYen        int64  `json:"billing_yen" db:"billing_yen"`                 // 合計請求金額
 }
 
 type VisitHistoryRow struct {
@@ -560,12 +617,142 @@ type VisitHistorySummaryRow struct {
 }
 
 // 大会ごとの課金レポートを計算する
-func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID int64, competitonID string) (*BillingReport, error) {
+//func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID int64, competitonID string) (*BillingReport, error) {
+//	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
+//	if err != nil {
+//		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
+//	}
+//	// 大会が終了していない場合は課金レポートを作成しない
+//	if !comp.FinishedAt.Valid {
+//		return &BillingReport{
+//			CompetitionID:    comp.ID,
+//			CompetitionTitle: comp.Title,
+//		}, nil
+//	}
+//	// ランキングにアクセスした参加者のIDを取得する
+//	vhs := []VisitHistorySummaryRow{}
+//	if err := adminDB.SelectContext(
+//		ctx,
+//		&vhs,
+//		"SELECT player_id, MIN(created_at) AS min_created_at FROM visit_history WHERE tenant_id = ? AND competition_id = ? GROUP BY player_id",
+//		tenantID,
+//		comp.ID,
+//	); err != nil && err != sql.ErrNoRows {
+//		return nil, fmt.Errorf("error Select visit_history: tenantID=%d, competitionID=%s, %w", tenantID, comp.ID, err)
+//	}
+//	billingMap := map[string]string{}
+//	for _, vh := range vhs {
+//		// competition.finished_atよりもあとの場合は、終了後に訪問したとみなして大会開催内アクセス済みとみなさない
+//		if comp.FinishedAt.Valid && comp.FinishedAt.Int64 < vh.MinCreatedAt {
+//			continue
+//		}
+//		billingMap[vh.PlayerID] = "visitor"
+//	}
+//
+//	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+//	//fl, err := flockByTenantID(tenantID)
+//	//if err != nil {
+//	//	return nil, fmt.Errorf("error flockByTenantID: %w", err)
+//	//}
+//	//defer fl.Close()
+//	tx, err := tenantDB.Beginx()
+//	if err != nil {
+//		return nil, fmt.Errorf("error bigin: %w", err)
+//	}
+//	defer tx.Commit()
+//
+//	// スコアを登録した参加者のIDを取得する
+//	scoredPlayerIDs := []string{}
+//	if err := tx.SelectContext(
+//		ctx,
+//		&scoredPlayerIDs,
+//		"SELECT DISTINCT(player_id) FROM player_score WHERE tenant_id = ? AND competition_id = ?",
+//		tenantID, comp.ID,
+//	); err != nil && err != sql.ErrNoRows {
+//		tx.Rollback()
+//		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+//	}
+//	for _, pid := range scoredPlayerIDs {
+//		// スコアが登録されている参加者
+//		billingMap[pid] = "player"
+//	}
+//
+//	// 大会が終了している場合のみ請求金額が確定するので計算する
+//	var playerCount, visitorCount int64
+//	if comp.FinishedAt.Valid {
+//		for _, category := range billingMap {
+//			switch category {
+//			case "player":
+//				playerCount++
+//			case "visitor":
+//				visitorCount++
+//			}
+//		}
+//	}
+//	return &BillingReport{
+//		CompetitionID:     comp.ID,
+//		CompetitionTitle:  comp.Title,
+//		PlayerCount:       playerCount,
+//		VisitorCount:      visitorCount,
+//		BillingPlayerYen:  100 * playerCount, // スコアを登録した参加者は100円
+//		BillingVisitorYen: 10 * visitorCount, // ランキングを閲覧だけした(スコアを登録していない)参加者は10円
+//		BillingYen:        100*playerCount + 10*visitorCount,
+//	}, nil
+//}
+
+var brCache = NewCache[string, *BillingReport]()
+
+func billingReportByCompetition(ctx context.Context, tenantDB *sqlx.DB, tenantID int64, competitonID string) (*BillingReport, error) {
 	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
 	}
+	// 大会が終了していない場合は課金レポートを作成しない
+	if !comp.FinishedAt.Valid {
+		return &BillingReport{
+			CompetitionID:    comp.ID,
+			CompetitionTitle: comp.Title,
+		}, nil
+	}
 
+	//tx, err := tenantDB.Beginx()
+	//if err != nil {
+	//	return nil, fmt.Errorf("error bigin: %w", err)
+	//}
+	//defer tx.Commit()
+
+	// 大会が終了している場合のみ請求金額が確定するので計算する
+
+	br := &BillingReport{}
+	cacheKey := fmt.Sprintf("bilingcache:%s", competitonID)
+	v, ok := brCache.Get(cacheKey)
+	if ok {
+		return v, nil
+	}
+	br, err = generateBillingReport(ctx, tenantDB, tenantID, competitonID)
+	if err != nil {
+		return nil, fmt.Errorf("error generateBillingReport: %w", err)
+	}
+	brCache.Set(cacheKey, br)
+
+	//err = tx.GetContext(ctx, br, "SELECT * FROM competition_report WHERE competition_id = ?", competitonID)
+	//if errors.Is(err, sql.ErrNoRows) {
+	//	return &BillingReport{
+	//		CompetitionID:    comp.ID,
+	//		CompetitionTitle: comp.Title,
+	//	}, nil
+	//} else if err != nil {
+	//	return nil, fmt.Errorf("error Select competition report: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+	//}
+	return br, nil
+}
+
+// 大会ごとの課金レポートを計算する
+func generateBillingReport(ctx context.Context, tenantDB *sqlx.DB, tenantID int64, competitonID string) (*BillingReport, error) {
+	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
+	}
 	// ランキングにアクセスした参加者のIDを取得する
 	vhs := []VisitHistorySummaryRow{}
 	if err := adminDB.SelectContext(
@@ -587,11 +774,11 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
+	//fl, err := flockByTenantID(tenantID)
+	//if err != nil {
+	//	return nil, fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
 
 	// スコアを登録した参加者のIDを取得する
 	scoredPlayerIDs := []string{}
@@ -620,7 +807,7 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 			}
 		}
 	}
-	return &BillingReport{
+	br := &BillingReport{
 		CompetitionID:     comp.ID,
 		CompetitionTitle:  comp.Title,
 		PlayerCount:       playerCount,
@@ -628,7 +815,18 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 		BillingPlayerYen:  100 * playerCount, // スコアを登録した参加者は100円
 		BillingVisitorYen: 10 * visitorCount, // ランキングを閲覧だけした(スコアを登録していない)参加者は10円
 		BillingYen:        100*playerCount + 10*visitorCount,
-	}, nil
+	}
+
+	//_, err = tenantDB.NamedExecContext(
+	//	ctx,
+	//	"INSERT INTO competition_report (competition_id, competition_title, player_count, visitor_count, billing_player_yen, billing_visitor_yen, billing_yen) VALUES (:competition_id, :competition_title, :player_count, :visitor_count, :billing_player_yen, :billing_visitor_yen, :billing_yen)",
+	//	br,
+	//)
+	//if err != nil {
+	//	return fmt.Errorf("error insert competition_report: %w", err)
+	//}
+
+	return br, nil
 }
 
 type TenantWithBilling struct {
@@ -698,7 +896,7 @@ func tenantsBillingHandler(c echo.Context) error {
 			if err != nil {
 				return fmt.Errorf("failed to connectToTenantDB: %w", err)
 			}
-			defer tenantDB.Close()
+			// defer tenantDB.Close()
 			cs := []CompetitionRow{}
 			if err := tenantDB.SelectContext(
 				ctx,
@@ -759,7 +957,7 @@ func playersListHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	var pls []PlayerRow
 	if err := tenantDB.SelectContext(
@@ -805,7 +1003,7 @@ func playersAddHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	params, err := c.FormParams()
 	if err != nil {
@@ -813,33 +1011,29 @@ func playersAddHandler(c echo.Context) error {
 	}
 	displayNames := params["display_name[]"]
 
-	pds := make([]PlayerDetail, 0, len(displayNames))
-	for _, displayName := range displayNames {
+	ids := make([]string, 0, len(displayNames))
+	for _ = range displayNames {
 		id, err := dispenseID(ctx)
 		if err != nil {
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
+		ids = append(ids, id)
+	}
 
+	vs := []string{}
+	pds := make([]PlayerDetail, 0, len(displayNames))
+	for i, displayName := range displayNames {
 		now := time.Now().Unix()
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			id, v.tenantID, displayName, false, now, now,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
-				id, displayName, false, now, now, err,
-			)
-		}
-		p, err := retrievePlayer(ctx, tenantDB, id)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		vs = append(vs, fmt.Sprintf("('%s', %d, '%s', %v, %v, %v)", ids[i], v.tenantID, displayName, false, now, now))
 		pds = append(pds, PlayerDetail{
-			ID:             p.ID,
-			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			ID:             ids[i],
+			DisplayName:    displayName,
+			IsDisqualified: false,
 		})
+	}
+	q := "INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES " + strings.Join(vs, ",")
+	if _, err := tenantDB.ExecContext(ctx, q); err != nil {
+		return fmt.Errorf("error Insert player at tenantDB: %w", err)
 	}
 
 	res := PlayersAddHandlerResult{
@@ -868,7 +1062,7 @@ func playerDisqualifiedHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	playerID := c.Param("player_id")
 
@@ -928,7 +1122,7 @@ func competitionsAddHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	title := c.FormValue("title")
 
@@ -974,32 +1168,47 @@ func competitionFinishHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
+
+	tx, err := tenantDB.Beginx()
+	if err != nil {
+		return fmt.Errorf("error begin transaction: %w", err)
+	}
+	defer tx.Commit()
 
 	id := c.Param("competition_id")
 	if id == "" {
+		tx.Rollback()
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	_, err = retrieveCompetition(ctx, tenantDB, id)
+	_, err = retrieveCompetition(ctx, tx, id)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
+			tx.Rollback()
 			return echo.NewHTTPError(http.StatusNotFound, "competition not found")
 		}
+		tx.Rollback()
 		return fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
 	now := time.Now().Unix()
-	if _, err := tenantDB.ExecContext(
+	if _, err := tx.ExecContext(
 		ctx,
 		"UPDATE competition SET finished_at = ?, updated_at = ? WHERE id = ?",
 		now, now, id,
 	); err != nil {
+		tx.Rollback()
 		return fmt.Errorf(
 			"error Update competition: finishedAt=%d, updatedAt=%d, id=%s, %w",
 			now, now, id, err,
 		)
 	}
+	//err = generateBillingReport(ctx, tx, v.tenantID, id)
+	//if err != nil {
+	//	tx.Rollback()
+	//	return fmt.Errorf("error generateBillingReport: %w", err)
+	//}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
@@ -1024,7 +1233,7 @@ func competitionScoreHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	competitionID := c.Param("competition_id")
 	if competitionID == "" {
@@ -1066,13 +1275,22 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 
 	// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
-	fl, err := flockByTenantID(v.tenantID)
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
+	tx, err := tenantDB.Beginx()
 	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
+		return fmt.Errorf("error tenantDB.Beginx: %w", err)
 	}
-	defer fl.Close()
+	defer tx.Commit()
+
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
+	pids := []string{}
+	pidsSets := map[string]struct{}{}
+	scoreStrs := []string{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1080,24 +1298,46 @@ func competitionScoreHandler(c echo.Context) error {
 			if err == io.EOF {
 				break
 			}
+			tx.Rollback()
 			return fmt.Errorf("error r.Read at rows: %w", err)
 		}
 		if len(row) != 2 {
+			tx.Rollback()
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
-			// 存在しない参加者が含まれている
-			if errors.Is(err, sql.ErrNoRows) {
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					fmt.Sprintf("player not found: %s", playerID),
-				)
-			}
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		pids = append(pids, playerID)
+		pidsSets[playerID] = struct{}{}
+		scoreStrs = append(scoreStrs, scoreStr)
+	}
+
+	pidUniques := lo.Keys(pidsSets)
+
+	var cnt int
+	query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pidUniques)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error sqlx.In: %w", err)
+	}
+	err = tx.GetContext(ctx, &cnt, query, args...)
+	if err != nil {
+		tx.Rollback()
+		return fmt.Errorf("error tx.GetContext: %w", err)
+	}
+
+	if cnt != len(pidsSets) {
+		// 存在しない参加者が含まれている
+		tx.Rollback()
+		return echo.NewHTTPError(
+			http.StatusBadRequest,
+			fmt.Sprintf("player not found"),
+		)
+	}
+
+	for i, scoreStr := range scoreStrs {
 		var score int64
-		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
+		if score, err = strconv.ParseInt(scoreStrs[i], 10, 64); err != nil {
+			tx.Rollback()
 			return echo.NewHTTPError(
 				http.StatusBadRequest,
 				fmt.Sprintf("error strconv.ParseUint: scoreStr=%s, %s", scoreStr, err),
@@ -1105,13 +1345,14 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 		id, err := dispenseID(ctx)
 		if err != nil {
+			tx.Rollback()
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
 		now := time.Now().Unix()
 		playerScoreRows = append(playerScoreRows, PlayerScoreRow{
 			ID:            id,
 			TenantID:      v.tenantID,
-			PlayerID:      playerID,
+			PlayerID:      pids[i],
 			CompetitionID: competitionID,
 			Score:         score,
 			RowNum:        rowNum,
@@ -1120,27 +1361,45 @@ func competitionScoreHandler(c echo.Context) error {
 		})
 	}
 
-	if _, err := tenantDB.ExecContext(
+	if _, err := tx.ExecContext(
 		ctx,
 		"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
 		v.tenantID,
 		competitionID,
 	); err != nil {
+		tx.Rollback()
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
+	values := []string{}
 	for _, ps := range playerScoreRows {
-		if _, err := tenantDB.NamedExecContext(
-			ctx,
-			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-			ps,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-				ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
-			)
-
-		}
+		values = append(values, fmt.Sprintf("('%s', %d, '%s', '%s', %d, %d, %d, %d)", ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt))
+		//if _, err := tx.NamedExecContext(
+		//	ctx,
+		//	"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
+		//	ps,
+		//); err != nil {
+		//	tx.Rollback()
+		//	return fmt.Errorf(
+		//		"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
+		//		ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
+		//	)
+		//
+		//}
 	}
+	q := fmt.Sprintf("INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES %s", strings.Join(values, ","))
+	if _, err := tx.ExecContext(
+		ctx,
+		q,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf(
+			"error ranking Insert player_score: %w", err,
+		)
+
+	}
+
+	cacheKey := fmt.Sprintf("ranking:%d:%s", v.tenantID, competitionID)
+	rankingCache.Del(cacheKey)
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -1169,7 +1428,7 @@ func billingHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	cs := []CompetitionRow{}
 	if err := tenantDB.SelectContext(
@@ -1226,7 +1485,7 @@ func playerHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1254,15 +1513,22 @@ func playerHandler(c echo.Context) error {
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
+
+	tx, err := tenantDB.Beginx()
 	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
+		return fmt.Errorf("error Beginx: %w", err)
 	}
-	defer fl.Close()
+	defer tx.Commit()
+
 	pss := make([]PlayerScoreRow, 0, len(cs))
 	for _, c := range cs {
 		ps := PlayerScoreRow{}
-		if err := tenantDB.GetContext(
+		if err := tx.GetContext(
 			ctx,
 			&ps,
 			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
@@ -1275,6 +1541,7 @@ func playerHandler(c echo.Context) error {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
+			tx.Rollback()
 			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, c.ID, p.ID, err)
 		}
 		pss = append(pss, ps)
@@ -1284,6 +1551,7 @@ func playerHandler(c echo.Context) error {
 	for _, ps := range pss {
 		comp, err := retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
 		if err != nil {
+			tx.Rollback()
 			return fmt.Errorf("error retrieveCompetition: %w", err)
 		}
 		psds = append(psds, PlayerScoreDetail{
@@ -1319,6 +1587,8 @@ type CompetitionRankingHandlerResult struct {
 	Ranks       []CompetitionRank `json:"ranks"`
 }
 
+var rankingCache = NewCache[string, []CompetitionRank]()
+
 // 参加者向けAPI
 // GET /api/player/competition/:competition_id/ranking
 // 大会ごとのランキングを取得する
@@ -1336,7 +1606,7 @@ func competitionRankingHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1364,12 +1634,12 @@ func competitionRankingHandler(c echo.Context) error {
 
 	if _, err := adminDB.ExecContext(
 		ctx,
-		"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		v.playerID, tenant.ID, competitionID, now, now,
+		"INSERT IGNORE INTO visit_history (player_id, tenant_id, competition_id, created_at) VALUES (?, ?, ?, ?)",
+		v.playerID, tenant.ID, competitionID, now,
 	); err != nil {
 		return fmt.Errorf(
-			"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
-			v.playerID, tenant.ID, competitionID, now, now, err,
+			"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, %w",
+			v.playerID, tenant.ID, competitionID, now, err,
 		)
 	}
 
@@ -1382,47 +1652,66 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
+	//fl, err := flockByTenantID(v.tenantID)
+	//if err != nil {
+	//	return fmt.Errorf("error flockByTenantID: %w", err)
+	//}
+	//defer fl.Close()
+
+	tx, err := tenantDB.Beginx()
 	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
+		return fmt.Errorf("error BeginTx: %w", err)
 	}
-	defer fl.Close()
-	pss := []PlayerScoreRow{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
-		tenant.ID,
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
-	}
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
-			continue
+	defer tx.Commit()
+
+	// cache
+	ranks := make([]CompetitionRank, 0)
+	cacheKey := fmt.Sprintf("ranking:%d:%s", tenant.ID, competitionID)
+	if v, ok := rankingCache.Get(cacheKey); ok {
+		ranks = v
+	} else {
+
+		pss := []PlayerScoreRowWithDisplayName{}
+		if err := tx.SelectContext(
+			ctx,
+			&pss,
+			"SELECT player_score.*, player.display_name FROM player_score INNER JOIN player ON player_score.tenant_id = ? AND player_score.competition_id = ? AND player_score.player_id = player.id ORDER BY row_num DESC;",
+			tenant.ID,
+			competitionID,
+		); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
+		scoredPlayerSet := make(map[string]struct{}, len(pss))
+		// playerとplayer_scoreは紐づいているのでN+1を潰せる
+		for _, ps := range pss {
+			// player_scoreが同一player_id内ではrow_numの降順でソートされているので
+			// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
+			if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+				continue
+			}
+			scoredPlayerSet[ps.PlayerID] = struct{}{}
+			//p, err := retrievePlayer(ctx, tx, ps.PlayerID)
+			//if err != nil {
+			//	tx.Rollback()
+			//	return fmt.Errorf("error retrievePlayer: %w", err)
+			//}
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          ps.PlayerID,
+				PlayerDisplayName: ps.DisplayName,
+				RowNum:            ps.RowNum,
+			})
 		}
-		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
-			RowNum:            ps.RowNum,
+		sort.Slice(ranks, func(i, j int) bool {
+			if ranks[i].Score == ranks[j].Score {
+				return ranks[i].RowNum < ranks[j].RowNum
+			}
+			return ranks[i].Score > ranks[j].Score
 		})
 	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].RowNum < ranks[j].RowNum
-		}
-		return ranks[i].Score > ranks[j].Score
-	})
+	rankingCache.Set(cacheKey, ranks)
+
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		if int64(i) < rankAfter {
@@ -1475,7 +1764,7 @@ func playerCompetitionsHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	if err := authorizePlayer(ctx, tenantDB, v.playerID); err != nil {
 		return err
@@ -1499,7 +1788,7 @@ func organizerCompetitionsHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tenantDB.Close()
+	// defer tenantDB.Close()
 
 	return competitionsHandler(c, v, tenantDB)
 }
