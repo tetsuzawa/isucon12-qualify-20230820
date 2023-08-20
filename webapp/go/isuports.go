@@ -702,7 +702,7 @@ func generateBillingReport(ctx context.Context, tenantDB *sqlx.Tx, tenantID int6
 		BillingYen:        100*playerCount + 10*visitorCount,
 	}
 
-	_, err = tenantDB.ExecContext(
+	_, err = tenantDB.NamedExecContext(
 		ctx,
 		"INSERT INTO competition_report (tenant_id, competition_id, competition_title, player_count, visitor_count, billing_player_yen, billing_visitor_yen, billing_yen) VALUES (:competition_id, :competition_title, :player_count, :visitor_count, :billing_player_yen, :billing_visitor_yen, :billing_yen)",
 		br,
