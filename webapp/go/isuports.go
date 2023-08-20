@@ -421,6 +421,14 @@ func retrieveCompetition(ctx context.Context, tenantDB dbOrTx, id string) (*Comp
 	return &c, nil
 }
 
+func retrieveCompetitionForUpdate(ctx context.Context, tenantDB dbOrTx, id string) (*CompetitionRow, error) {
+	var c CompetitionRow
+	if err := tenantDB.GetContext(ctx, &c, "SELECT * FROM competition FOR UPDATE WHERE id = ?", id); err != nil {
+		return nil, fmt.Errorf("error Select competition: id=%s, %w", id, err)
+	}
+	return &c, nil
+}
+
 type PlayerScoreRow struct {
 	TenantID      int64  `db:"tenant_id"`
 	ID            string `db:"id"`
@@ -1106,7 +1114,7 @@ func competitionFinishHandler(c echo.Context) error {
 		tx.Rollback()
 		return echo.NewHTTPError(http.StatusBadRequest, "competition_id required")
 	}
-	_, err = retrieveCompetition(ctx, tx, id)
+	_, err = retrieveCompetitionForUpdate(ctx, tx, id)
 	if err != nil {
 		// 存在しない大会
 		if errors.Is(err, sql.ErrNoRows) {
