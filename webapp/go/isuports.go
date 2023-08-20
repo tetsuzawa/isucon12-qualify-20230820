@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"github.com/samber/lo"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -1266,6 +1267,7 @@ func competitionScoreHandler(c echo.Context) error {
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
 	pids := []string{}
+	pidsSets := map[string]struct{}{}
 	scoreStrs := []string{}
 	for {
 		rowNum++
@@ -1283,24 +1285,24 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 		playerID, scoreStr := row[0], row[1]
 		pids = append(pids, playerID)
+		pidsSets[playerID] = struct{}{}
 		scoreStrs = append(scoreStrs, scoreStr)
-		fmt.Println("playerID:", playerID)
 	}
 
+	pidUniques := lo.Keys(pidsSets)
+
 	var cnt int
-	query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pids)
+	query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pidUniques)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("error sqlx.In: %w", err)
 	}
-	fmt.Println(query, args)
 	err = tx.GetContext(ctx, &cnt, query, args...)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("error tx.GetContext: %w", err)
 	}
 
-	fmt.Println("cnts: ", cnt, pids)
 	if cnt != len(pids) {
 		// 存在しない参加者が含まれている
 		tx.Rollback()
