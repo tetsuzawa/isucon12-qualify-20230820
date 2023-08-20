@@ -1219,6 +1219,19 @@ type ScoreHandlerResult struct {
 	Rows int64 `json:"rows"`
 }
 
+const (
+	maxRetries          = 5
+	deadlockErrCode     = 1213
+	sleepBetweenRetries = 200 * time.Millisecond
+)
+
+func isDeadlockError(err error) bool {
+	if mysqlErr, ok := err.(*mysql.MySQLError); ok && mysqlErr.Number == deadlockErrCode {
+		return true
+	}
+	return false
+}
+
 // テナント管理者向けAPI
 // POST /api/organizer/competition/:competition_id/score
 // 大会のスコアをCSVでアップロードする
@@ -1283,131 +1296,140 @@ func competitionScoreHandler(c echo.Context) error {
 	//	return fmt.Errorf("error flockByTenantID: %w", err)
 	//}
 	//defer fl.Close()
-	tx, err := tenantDB.Beginx()
-	if err != nil {
-		return fmt.Errorf("error tenantDB.Beginx: %w", err)
-	}
-	defer tx.Commit()
-
-	var rowNum int64
-	playerScoreRows := []PlayerScoreRow{}
-	pids := []string{}
-	pidsSets := map[string]struct{}{}
-	scoreStrs := []string{}
-	for {
-		rowNum++
-		row, err := r.Read()
+	for ii := 0; ii < maxRetries; ii++ {
+		tx, err := tenantDB.Beginx()
 		if err != nil {
-			if err == io.EOF {
-				break
+			return fmt.Errorf("error tenantDB.Beginx: %w", err)
+		}
+		defer tx.Commit()
+
+		var rowNum int64
+		playerScoreRows := []PlayerScoreRow{}
+		pids := []string{}
+		pidsSets := map[string]struct{}{}
+		scoreStrs := []string{}
+		for {
+			rowNum++
+			row, err := r.Read()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				tx.Rollback()
+				return fmt.Errorf("error r.Read at rows: %w", err)
 			}
-			tx.Rollback()
-			return fmt.Errorf("error r.Read at rows: %w", err)
+			if len(row) != 2 {
+				tx.Rollback()
+				return fmt.Errorf("row must have two columns: %#v", row)
+			}
+			playerID, scoreStr := row[0], row[1]
+			pids = append(pids, playerID)
+			pidsSets[playerID] = struct{}{}
+			scoreStrs = append(scoreStrs, scoreStr)
 		}
-		if len(row) != 2 {
+
+		pidUniques := lo.Keys(pidsSets)
+
+		var cnt int
+		query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pidUniques)
+		if err != nil {
 			tx.Rollback()
-			return fmt.Errorf("row must have two columns: %#v", row)
+			return fmt.Errorf("error sqlx.In: %w", err)
 		}
-		playerID, scoreStr := row[0], row[1]
-		pids = append(pids, playerID)
-		pidsSets[playerID] = struct{}{}
-		scoreStrs = append(scoreStrs, scoreStr)
-	}
+		err = tx.GetContext(ctx, &cnt, query, args...)
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("error tx.GetContext: %w", err)
+		}
 
-	pidUniques := lo.Keys(pidsSets)
-
-	var cnt int
-	query, args, err := sqlx.In("SELECT COUNT(*) FROM player WHERE id IN (?)", pidUniques)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error sqlx.In: %w", err)
-	}
-	err = tx.GetContext(ctx, &cnt, query, args...)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error tx.GetContext: %w", err)
-	}
-
-	if cnt != len(pidsSets) {
-		// 存在しない参加者が含まれている
-		tx.Rollback()
-		return echo.NewHTTPError(
-			http.StatusBadRequest,
-			fmt.Sprintf("player not found"),
-		)
-	}
-
-	for i, scoreStr := range scoreStrs {
-		var score int64
-		if score, err = strconv.ParseInt(scoreStrs[i], 10, 64); err != nil {
+		if cnt != len(pidsSets) {
+			// 存在しない参加者が含まれている
 			tx.Rollback()
 			return echo.NewHTTPError(
 				http.StatusBadRequest,
-				fmt.Sprintf("error strconv.ParseUint: scoreStr=%s, %s", scoreStr, err),
+				fmt.Sprintf("player not found"),
 			)
 		}
-		id, err := dispenseID(ctx)
-		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("error dispenseID: %w", err)
+
+		for i, scoreStr := range scoreStrs {
+			var score int64
+			if score, err = strconv.ParseInt(scoreStrs[i], 10, 64); err != nil {
+				tx.Rollback()
+				return echo.NewHTTPError(
+					http.StatusBadRequest,
+					fmt.Sprintf("error strconv.ParseUint: scoreStr=%s, %s", scoreStr, err),
+				)
+			}
+			id, err := dispenseID(ctx)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("error dispenseID: %w", err)
+			}
+			now := time.Now().Unix()
+			playerScoreRows = append(playerScoreRows, PlayerScoreRow{
+				ID:            id,
+				TenantID:      v.tenantID,
+				PlayerID:      pids[i],
+				CompetitionID: competitionID,
+				Score:         score,
+				RowNum:        rowNum,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			})
 		}
-		now := time.Now().Unix()
-		playerScoreRows = append(playerScoreRows, PlayerScoreRow{
-			ID:            id,
-			TenantID:      v.tenantID,
-			PlayerID:      pids[i],
-			CompetitionID: competitionID,
-			Score:         score,
-			RowNum:        rowNum,
-			CreatedAt:     now,
-			UpdatedAt:     now,
+
+		if _, err := tx.ExecContext(
+			ctx,
+			"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
+			v.tenantID,
+			competitionID,
+		); isDeadlockError(err) {
+			c.Logger().Info("dead lock retry")
+			continue
+		} else if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
+		}
+		values := []string{}
+		for _, ps := range playerScoreRows {
+			values = append(values, fmt.Sprintf("('%s', %d, '%s', '%s', %d, %d, %d, %d)", ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt))
+			//if _, err := tx.NamedExecContext(
+			//	ctx,
+			//	"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
+			//	ps,
+			//); err != nil {
+			//	tx.Rollback()
+			//	return fmt.Errorf(
+			//		"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
+			//		ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
+			//	)
+			//
+			//}
+		}
+		q := fmt.Sprintf("INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES %s", strings.Join(values, ","))
+		if _, err := tx.ExecContext(
+			ctx,
+			q,
+		); isDeadlockError(err) {
+			c.Logger().Info("dead lock retry")
+			continue
+		} else if err != nil {
+			tx.Rollback()
+			return fmt.Errorf(
+				"error ranking Insert player_score: %w", err,
+			)
+
+		}
+
+		cacheKey := fmt.Sprintf("ranking:%d:%s", v.tenantID, competitionID)
+		rankingCache.Del(cacheKey)
+
+		return c.JSON(http.StatusOK, SuccessResult{
+			Status: true,
+			Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
 		})
 	}
-
-	if _, err := tx.ExecContext(
-		ctx,
-		"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
-		v.tenantID,
-		competitionID,
-	); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
-	}
-	values := []string{}
-	for _, ps := range playerScoreRows {
-		values = append(values, fmt.Sprintf("('%s', %d, '%s', '%s', %d, %d, %d, %d)", ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt))
-		//if _, err := tx.NamedExecContext(
-		//	ctx,
-		//	"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-		//	ps,
-		//); err != nil {
-		//	tx.Rollback()
-		//	return fmt.Errorf(
-		//		"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-		//		ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
-		//	)
-		//
-		//}
-	}
-	q := fmt.Sprintf("INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES %s", strings.Join(values, ","))
-	if _, err := tx.ExecContext(
-		ctx,
-		q,
-	); err != nil {
-		tx.Rollback()
-		return fmt.Errorf(
-			"error ranking Insert player_score: %w", err,
-		)
-
-	}
-
-	cacheKey := fmt.Sprintf("ranking:%d:%s", v.tenantID, competitionID)
-	rankingCache.Del(cacheKey)
-
-	return c.JSON(http.StatusOK, SuccessResult{
-		Status: true,
-		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
-	})
+	return fmt.Errorf("dead lock retry max count")
 }
 
 type BillingHandlerResult struct {
@@ -1529,7 +1551,7 @@ func playerHandler(c echo.Context) error {
 	defer tx.Commit()
 
 	pss := make([]PlayerScoreRow, 0, len(cs))
-	for _, c := range cs {
+	for _, ccc := range cs {
 		ps := PlayerScoreRow{}
 		if err := tx.GetContext(
 			ctx,
@@ -1537,15 +1559,18 @@ func playerHandler(c echo.Context) error {
 			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
 			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1",
 			v.tenantID,
-			c.ID,
+			ccc.ID,
 			p.ID,
-		); err != nil {
+		); isDeadlockError(err) {
+			c.Logger().Info("dead lock retry ")
+			continue
+		} else if err != nil {
 			// 行がない = スコアが記録されてない
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
 			tx.Rollback()
-			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, c.ID, p.ID, err)
+			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, ccc.ID, p.ID, err)
 		}
 		pss = append(pss, ps)
 	}
