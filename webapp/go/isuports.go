@@ -979,7 +979,6 @@ func playersAddHandler(c echo.Context) error {
 		ctx,
 		&pls,
 		query,
-		args,
 	); err != nil {
 		return fmt.Errorf("error Select player: %w", err)
 	}
