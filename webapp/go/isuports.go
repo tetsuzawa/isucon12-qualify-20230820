@@ -1137,7 +1137,7 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 	values := []string{}
 	for _, ps := range playerScoreRows {
-		values = append(values, fmt.Sprintf("(%s, %d, %s, %s, %d, %d, %d, %d)", ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt))
+		values = append(values, fmt.Sprintf("('%s', %d, '%s', '%s', %d, %d, %d, %d)", ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt))
 		//if _, err := tx.NamedExecContext(
 		//	ctx,
 		//	"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
