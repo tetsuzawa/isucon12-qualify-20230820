@@ -53,7 +53,7 @@ INSERT INTO player VALUES('510489a57',27,'Thora Morissette',0,1653538003,1654000
 INSERT INTO player VALUES('518f0a331',27,'Narciso Upton',0,1653552526,1653582498);
 INSERT INTO player VALUES('520a0690e',27,'Mr. Marlin Wolff',0,1653565422,1653983108);
 INSERT INTO player VALUES('53e0a0331',27,'Madisen Hills',0,1653614768,1653810059);
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS player_score (
+CREATE TABLE IF NOT EXISTS player_score (
                               id VARCHAR(255) NOT NULL PRIMARY KEY,
                               tenant_id BIGINT NOT NULL,
                               player_id VARCHAR(255) NOT NULL,

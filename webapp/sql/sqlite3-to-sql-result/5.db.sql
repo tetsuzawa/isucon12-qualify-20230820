@@ -143,7 +143,7 @@ INSERT INTO player VALUES('61fbffeb7',5,'Florence Rowe',0,1653993448,1654027326)
 INSERT INTO player VALUES('622b1ee6d',5,'Meda Kohler',0,1653998389,1654028132);
 INSERT INTO player VALUES('62ecc13b3',5,'Ms. Anjali Spencer III',0,1654018693,1654038036);
 INSERT INTO player VALUES('63a0b8fdb',5,'Ms. Queenie O"Reilly IV',0,1654037564,1654037569);
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS player_score (
+CREATE TABLE IF NOT EXISTS player_score (
                               id VARCHAR(255) NOT NULL PRIMARY KEY,
                               tenant_id BIGINT NOT NULL,
                               player_id VARCHAR(255) NOT NULL,

@@ -111,7 +111,7 @@ INSERT INTO player VALUES('61bc02181',53,'Raina Spinka',0,1653986738,1653992300)
 INSERT INTO player VALUES('626edc3a3',53,'Ronaldo Kuhic',0,1654005492,1654007798);
 INSERT INTO player VALUES('633d65c30',53,'Mr. Marshall Larson I',0,1654027149,1654029648);
 INSERT INTO player VALUES('63c0f0151',53,'Jacques Satterfield',0,1654040942,1654041220);
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS player_score (
+CREATE TABLE IF NOT EXISTS player_score (
                               id VARCHAR(255) NOT NULL PRIMARY KEY,
                               tenant_id BIGINT NOT NULL,
                               player_id VARCHAR(255) NOT NULL,

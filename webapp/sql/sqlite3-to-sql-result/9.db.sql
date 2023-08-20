@@ -129,7 +129,7 @@ INSERT INTO player VALUES('5f8a6b015',9,'Rex Metz Sr.',0,1653927851,1653977844);
 INSERT INTO player VALUES('60133b672',9,'Jarrod Mueller',0,1653942197,1653999802);
 INSERT INTO player VALUES('611e27ec3',9,'Matilde Kling',0,1653970186,1653978402);
 INSERT INTO player VALUES('636c7886f',9,'Jewell Schowalter',0,1654032085,1654033422);
-CREATE TABLE IF NOT EXISTS IF NOT EXISTS player_score (
+CREATE TABLE IF NOT EXISTS player_score (
                               id VARCHAR(255) NOT NULL PRIMARY KEY,
                               tenant_id BIGINT NOT NULL,
                               player_id VARCHAR(255) NOT NULL,
